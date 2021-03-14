@@ -40,9 +40,9 @@
             "cycling": null
         },
         "training load best models": {
-            "running": "LinearRegression",
+            "running": null,
             "swimming": null,
-            "cycling": "LinearRegression",
+            "cycling": null,
             "strength_training": null,
             "others": null
         }
@@ -256,9 +256,9 @@
             "cycling": null
         },
         "training load best models": {
-            "running": "LinearRegression",
+            "running": null,
             "swimming": null,
-            "cycling": "LinearRegression",
+            "cycling": null,
             "strength_training": null,
             "others": null
         }
@@ -280,7 +280,7 @@
             "cycling": null
         },
         "training load best models": {
-            "running": "LinearRegression",
+            "running": "XGBoost",
             "swimming": null,
             "cycling": null,
             "strength_training": null,

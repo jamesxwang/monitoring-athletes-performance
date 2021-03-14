@@ -29,7 +29,13 @@ from sklearn.linear_model import Lasso
 from sklearn.preprocessing import StandardScaler
 from mlxtend.feature_selection import SequentialFeatureSelector as SFS
 from warnings import filterwarnings
-import numpy as np
+import csv
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels \
+    import RBF, WhiteKernel, RationalQuadratic, ExpSineSquared
+from sklearn.linear_model import BayesianRidge
+
+
 filterwarnings('ignore')
 
 # Self-defined modules
@@ -154,6 +160,64 @@ class ModelSVM(TrainLoadModelBuilder):
         mae, rmse, rsquared = self._validate_model_regression(X_test, y_test, classifier)
         self._display_performance_results_regression('SVM', mae, rmse, rsquared)
 
+class ModelBayesianRidge(TrainLoadModelBuilder):
+    def __init__(self, dataframe, activity_features):
+        super().__init__(dataframe, activity_features)
+
+    def _build_model(self, X_train, y_train):
+        clf = BayesianRidge(compute_score=True)
+        clf.fit(X_train, y_train)
+
+        return clf
+    
+    def process_modeling(self):
+        X_train, X_test, y_train, y_test = self._split_train_validation()
+        regressor = self._build_model(X_train, y_train)
+        mae, rmse, rsquared = self._validate_model_regression(X_test, y_test, regressor)
+        self._display_performance_results_regression('BayesianRidge', mae, rmse, rsquared)
+
+        return mae, regressor
+
+class ModelGaussianProcess(TrainLoadModelBuilder):
+    def __init__(self, dataframe, activity_features):
+        super().__init__(dataframe, activity_features)
+
+    def _build_model(self, X_train, y_train):
+        k1 = 235**2 * RBF(length_scale=23.6)  # long term smooth rising trend
+        k2 = 1.59**2 * RBF(length_scale=23.3) \
+            * ExpSineSquared(length_scale=1.0, periodicity=1.0,
+                            periodicity_bounds="fixed")  # seasonal component
+        # medium term irregularities
+        k3 = 0.1**2 * RationalQuadratic(length_scale=1.0, alpha=1.0)
+        k4 = 0.1**2 * RBF(length_scale=0.1) \
+            + WhiteKernel(noise_level=0.1**2,
+                        noise_level_bounds=(1e-3, np.inf))  # noise terms
+        # kernel_gpml = k1 + k2 + k4
+
+        # k1 = 1**2 * RBF(length_scale=1)  # long term smooth rising trend
+        # k2 = 1**2 * RBF(length_scale=1) \
+        #     * ExpSineSquared(length_scale=1, periodicity=1.0)  # seasonal component
+        # # medium term irregularity
+        # k3 = 1**2 \
+        #     * RationalQuadratic(length_scale=1, alpha=1)
+        # k4 = 1**2 * RBF(length_scale=1) \
+        #     + WhiteKernel(noise_level=1**2)  # noise terms
+        kernel_gpml = k1 + k2 + k3 + k4
+
+        gp_initial = GaussianProcessRegressor(kernel=kernel_gpml, alpha=0, normalize_y=True, optimizer='fmin_l_bfgs_b', n_restarts_optimizer=0)
+        gp_initial.fit(X_train, y_train)
+        # print("GPML kernel: %s" % gp_initial.kernel_)
+        # print("Log-marginal-likelihood: %.3f"
+        #     % gp_initial.log_marginal_likelihood(gp_initial.kernel_.theta))
+        return gp_initial
+
+    def process_modeling(self):
+        X_train, X_test, y_train, y_test = self._split_train_validation()
+        regressor = self._build_model(X_train, y_train)
+        mae, rmse, rsquared = self._validate_model_regression(X_test, y_test, regressor)
+        self._display_performance_results_regression('GaussianProcess', mae, rmse, rsquared)
+
+        return mae, regressor
 
 class ModelNeuralNetwork(TrainLoadModelBuilder):
 
@@ -385,7 +449,7 @@ def process_train_load_modeling(athletes_name):
 
             def select_best_model():
                 min_mae, best_model_type, best_regressor = float('inf'), '', None
-                for model_class in [ModelLinearRegression, ModelNeuralNetwork, ModelRandomForest, ModelXGBoost, ModelAdaBoost]:
+                for model_class in [ModelBayesianRidge, ModelGaussianProcess, ModelLinearRegression, ModelNeuralNetwork, ModelRandomForest, ModelXGBoost, ModelAdaBoost]:
                     model_type = model_class.__name__[5:]
                     print('\nBuilding {}...'.format(model_type))
                     builder = model_class(sub_dataframe_for_modeling, features)

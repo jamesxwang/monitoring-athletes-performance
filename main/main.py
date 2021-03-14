@@ -94,9 +94,9 @@ if __name__ == '__main__':
     # main()
 
     # For Developers. Uncomment the following lines if you would like test the system.
-    athletes_names = ['eduardo_oliveira', 'xu_chen', 'carly_hart']
+    athletes_names = ['carly_hart']
     internal_args = ['--athletes-names={}'.format(' '.join(athletes_names)),
                      '--initialize-system=False', '--clean-data=False', '--process-feature-engineering=False',
-                     '--build-model=False', '--generate-pmc=True']
+                     '--build-model=True', '--generate-pmc=False']
     main(internal_args)
 
