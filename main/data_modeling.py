@@ -34,7 +34,10 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels \
     import RBF, WhiteKernel, RationalQuadratic, ExpSineSquared
 from sklearn.linear_model import BayesianRidge
-
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from tqdm import tqdm, trange
 
 filterwarnings('ignore')
 
@@ -169,7 +172,7 @@ class ModelBayesianRidge(TrainLoadModelBuilder):
         clf.fit(X_train, y_train)
 
         return clf
-    
+
     def process_modeling(self):
         X_train, X_test, y_train, y_test = self._split_train_validation()
         regressor = self._build_model(X_train, y_train)
@@ -425,6 +428,120 @@ class ModelAdaBoost(TrainLoadModelBuilder):
         return mae, regressor
 
 
+class ToyModel(nn.Module):
+    def __init__(self, in_dim=11, out_dim=1):
+        super(ToyModel, self).__init__()
+        self.layer1 = nn.Sequential(
+            nn.Linear(in_dim, 128),
+            nn.ReLU(),
+            nn.LayerNorm(128)
+        )
+        self.layer2 = nn.Sequential(
+            nn.Linear(128, 256),
+            nn.GELU(),
+            nn.LayerNorm(256)
+        )
+        self.layer3 = nn.Sequential(
+            nn.Linear(256, 512),
+            nn.GELU(),
+            nn.LayerNorm(512)
+        )
+        self.layer4 = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.GELU(),
+            nn.LayerNorm(256)
+        )
+        self.layer5 = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.GELU(),
+            nn.LayerNorm(128)
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(128, 1)
+        )
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        x = self.fc(x)
+        return x
+
+    def predict(self, x):
+        x = torch.tensor(x).float()
+        y = self.forward(x)
+        y = y.detach().cpu().numpy()
+        return y
+
+class ModelTorchNN(TrainLoadModelBuilder):
+    # PyTorch Model
+    def __init__(self, dataframe, activity_features):
+        super().__init__(dataframe, activity_features)
+
+    def _build_model(self, X_train, X_test, y_train, y_test):
+        # Split into  Train/Test
+        X_train, y_train = np.array(X_train), np.array(y_train),
+        X_test, y_test = np.array(X_test), np.array(y_test)
+        X_full = np.concatenate((X_train, X_test), axis=0)
+        y_full = np.concatenate((y_train, y_test), axis=0)
+        X_mean = np.mean(X_full, axis=0)
+        X_std = np.std(X_full, axis=0)
+        X_full = (X_full - X_mean) / X_std
+        X_train = (X_train - X_mean) / X_std
+        X_test = (X_test - X_mean) / X_std
+
+        # Build PyTorch Model
+        epochs = 1000
+        batch_size = 16
+        model = ToyModel(in_dim=X_train.shape[1], out_dim=1)
+        loss_fn = torch.nn.L1Loss()
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.0005,
+                                    weight_decay=5.e-4, momentum=0.9)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                               T_max=epochs,
+                                                               eta_min=0.0)
+        t = trange(epochs, desc='Loss=0.0000', leave=True)
+
+        def chunks(lst, n):
+            """Yield successive n-sized chunks from lst."""
+            for i in range(0, len(lst), n):
+                yield lst[i:i + n]
+
+        # Train Model
+        for epoch in t:
+            model.train()
+            indices = np.arange(X_train.shape[0])
+            np.random.shuffle(indices)
+            X_train = X_train[indices]
+            y_train = y_train[indices]
+            x_batch = list(chunks(X_train, batch_size))
+            y_batch = list(chunks(y_train, batch_size))
+            loss_sum = 0
+            for i in range(len(x_batch)):
+                x = torch.tensor(x_batch[i]).float()
+                y = torch.tensor(y_batch[i]).float()
+                model.zero_grad()
+                pred = model(x)
+                loss = loss_fn(pred, y)
+                loss.backward()
+                optimizer.step()
+                scheduler.step()
+                loss_sum += loss.item()
+            t.set_description("Loss=%.4f" % (loss_sum/len(x_batch)))
+        #
+        model.eval()
+        y_preds = np.reshape(model.predict(X_full), (X_full.shape[0],))
+        mae = mean_absolute_error(y_full, y_preds)
+        return mae, model
+
+    def process_modeling(self):
+        X_train, X_test, y_train, y_test = self._split_train_validation()
+        mae, neural_network = self._build_model(X_train, X_test, y_train, y_test)
+        return mae, neural_network
+
+
 class PerformanceModelBuilder():
 
     def __init__(self):
@@ -449,18 +566,24 @@ def process_train_load_modeling(athletes_name):
 
             def select_best_model():
                 min_mae, best_model_type, best_regressor = float('inf'), '', None
-                for model_class in [ModelBayesianRidge, ModelGaussianProcess, ModelLinearRegression, ModelNeuralNetwork, ModelRandomForest, ModelXGBoost, ModelAdaBoost]:
+                for model_class in [ModelBayesianRidge, ModelGaussianProcess, ModelLinearRegression, ModelNeuralNetwork, ModelRandomForest, ModelXGBoost, ModelAdaBoost, ModelTorchNN]:
+                # for model_class in [ModelTorchNN]:
                     model_type = model_class.__name__[5:]
                     print('\nBuilding {}...'.format(model_type))
                     builder = model_class(sub_dataframe_for_modeling, features)
                     mae, regressor = builder.process_modeling()
                     if model_type != 'NeuralNetwork':
                         utility.save_model(athletes_name, activity, model_type, regressor)
+                        print('min_mae: ', min_mae)
+                        print('mae: ', mae)
+                        print('best_model_type: ', best_model_type)
+                        print('best_regressor: ', best_regressor)
                         if mae < min_mae: min_mae, best_model_type, best_regressor = mae, model_type, regressor
                 print("\n***Best model for activity '{}' is {} with mean absolute error: {}***"
                   .format(activity, best_model_type, min_mae))
                 if best_regressor is not None:
                     best_model_dict[activity] = best_model_type
+                print('best_model_dict: ', best_model_dict)
 
             select_best_model()
             utility.SystemReminder().display_activity_modeling_end(activity, True)
@@ -475,7 +598,8 @@ def process_performance_modeling(athletes_name):
 
 
 if __name__ == '__main__':
-    athletes_names = ['eduardo oliveira', 'xu chen', 'carly hart']
+    # athletes_names = ['eduardo oliveira', 'xu chen', 'carly hart']
+    athletes_names = ['carly hart']
     for athletes_name in athletes_names:
         print('\n\n\n{} {} {} '.format('='*25, athletes_name.title(), '='*25))
         process_train_load_modeling(athletes_name)
