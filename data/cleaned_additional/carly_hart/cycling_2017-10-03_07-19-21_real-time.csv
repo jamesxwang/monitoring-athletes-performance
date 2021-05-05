@@ -1,0 +1,2 @@
+timestamp,time_in_seconds,position_lat,position_long,distance,enhanced_altitude,altitude,enhanced_speed,speed,heart_rate,cadence,fractional_cadence,temperature,timestamp_utc,timezone
+2017-10-03 18:19:21+11:00,65961,-37.842880636453636,144.9612910207361,0.0,0.0,2500,0.0,0.0,,85,,23,2017-10-03 07:19:21,Australia/Melbourne
