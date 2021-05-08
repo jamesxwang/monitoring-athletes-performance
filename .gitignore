@@ -1,5 +1,8 @@
-data/
+data/cleaned_additional
+data/cleaned_*
+data/csv_*
+data/fit_*
 .DS_Store
 *.pyc
-merged_dataframes/
+# merged_dataframes/
 log/
