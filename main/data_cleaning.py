@@ -1004,8 +1004,9 @@ def _main_helper_training_descriptions(athletes_name=None, verbose=False):
     # print('---------------------- \ndf2: \n', df2.loc[130:145])
     final_df = pd.merge(df1, df2, left_on='date', right_on='date', left_index=True, how='inner')
     # print(final_df)
+    return final_df
 
-    data_merge._save_merged_df('one_hot.csv', final_df, verbose=True)
+    # data_merge.save_df_with_array('one_hot.csv', final_df, verbose=True)
 
 
 
@@ -1100,12 +1101,12 @@ if __name__ == '__main__':
     # Clean training descriptions
     main('training_descriptions', athletes_name=athletes_names[0], verbose=True)
 
-    # Clean spreadsheet data
-    # main('spreadsheet')  # clean all spreadsheet data
-    main('spreadsheet', athletes_name=athletes_names[0], verbose=True)  # clean spreadsheet data for one athlete
+    # # Clean spreadsheet data
+    # # main('spreadsheet')  # clean all spreadsheet data
+    # main('spreadsheet', athletes_name=athletes_names[0], verbose=True)  # clean spreadsheet data for one athlete
 
-    # Clean additional data
-    activity_types = ['cycling', 'running', 'swimming']
-    split_type = 'real-time'
-    for activity_type in activity_types:
-        main('additional', athletes_name=athletes_names[0], activity_type=activity_type, split_type=split_type, verbose=True)
+    # # Clean additional data
+    # activity_types = ['cycling', 'running', 'swimming']
+    # split_type = 'real-time'
+    # for activity_type in activity_types:
+    #     main('additional', athletes_name=athletes_names[0], activity_type=activity_type, split_type=split_type, verbose=True)

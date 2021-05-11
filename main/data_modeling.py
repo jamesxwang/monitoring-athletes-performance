@@ -39,6 +39,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm, trange
 from matplotlib import pyplot as plt
+import json
+import data_cleaning
 
 filterwarnings('ignore')
 
@@ -554,6 +556,23 @@ class ModelTorchNN(TrainLoadModelBuilder):
         mae, neural_network = self._build_model(X_train, X_test, y_train, y_test)
         return mae, neural_network
 
+class ModelTorchRNN(TrainLoadModelBuilder):
+    # PyTorch Model
+    def __init__(self, dataframe, activity_features):
+        super().__init__(dataframe, activity_features)
+
+    def _build_model(self, X_train, X_test, y_train, y_test):
+        X_train, y_train = np.array(X_train), np.array(y_train)
+        X_test, y_test = np.array(X_test), np.array(y_test)
+        print('X_train.shape: ', X_train.shape)
+        print('X_test.shape: ', X_test.shape)
+        print('np.array(X_train[0][0]).shape: ', np.array(X_train[0][0]).shape)
+
+    def process_modeling(self):
+        X_train, X_test, y_train, y_test = self._split_train_validation()
+        mae, neural_network = self._build_model(X_train, X_test, y_train, y_test)
+        return mae, neural_network
+
 
 class PerformanceModelBuilder():
 
@@ -561,18 +580,17 @@ class PerformanceModelBuilder():
         pass
 
 def process_training_description_modeling(athletes_name):
-    loader = data_loader.DataLoader()
-    df = pd.DataFrame(loader.load_one_hot_data(athletes_name=athletes_name))
+    df = data_cleaning._main_helper_training_descriptions(athletes_name=athletes_name)
     print('df: ', df)
     best_model_dict = {}
 
     def select_best_model():
         min_mae, best_model_type, best_regressor = float('inf'), '', None
-        for model_class in [ModelTorchNN]:
+        for model_class in [ModelTorchRNN]:
             model_type = model_class.__name__[5:]
             print('\nBuilding {}...'.format(model_type))
             sub_dataframe_for_modeling = df[df['Training Stress Score®'].notnull()]
-            builder = model_class(sub_dataframe_for_modeling)
+            builder = model_class(sub_dataframe_for_modeling, ['onehot'])
             mae, regressor = builder.process_modeling()
             utility.save_model(athletes_name, None, model_type, regressor)
             print('min_mae: ', min_mae)
@@ -644,4 +662,3 @@ if __name__ == '__main__':
         # process_train_load_modeling(athletes_name)
         process_performance_modeling(athletes_name)
         process_training_description_modeling(athletes_name)
-
