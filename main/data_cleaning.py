@@ -8,10 +8,14 @@ environment you are running this script in.
 This file can also be imported as a module
 """
 # Packages
+import sys
+import re
 import numpy as np
 import pandas as pd
 import os
 import datetime as dt
+from datetime import timedelta
+from dateutil.relativedelta import relativedelta
 import pandas_profiling
 import warnings
 import matplotlib.pyplot as plt
@@ -25,9 +29,16 @@ from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifi
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.impute import KNNImputer
 from sklearn.neighbors import LocalOutlierFactor
+import functools
+import operator
+import html2text
+import nltk
+from nltk.tokenize import word_tokenize
 # Self-defined modules
 import utility
 from data_loader import DataLoader
+import data_merge
+nltk.download('punkt')
 # Settings
 # warnings.filterwarnings('ignore')
 plt.style.use('ggplot')
@@ -737,6 +748,157 @@ class AdditionalDataCleaner():
         self.handle_outliers()
         return self.dataframe
 
+class TrainingDescriptionsDataCleaner():
+    def grep(self, array, string):
+        return [i for i, item in enumerate(array) if re.search(string, item)]
+
+    def prefix_dict(self, di_, prefix_s=''):
+        """
+        Add prefix_s to every key in dict
+        :param di_:
+        :param prefix_s:
+        :return:
+        """
+        return {prefix_s + k: v for k, v in di_.items()}
+
+    def spear_dict(self, di_, con_s='_', with_k=True):
+        """
+        :param di_: input dict
+        :param con_s: connection character
+        :return: dict with depth 1
+        """
+        ret_di = {}
+        for k, v in di_.items():
+            if type(v) is dict:
+                v = self.spear_dict(v)
+                ret_di.update(self.prefix_dict(v, prefix_s=k + con_s if with_k else ''))
+            else:
+                ret_di.update({k: v})
+        return ret_di
+    
+    def _keep_useful_keys(self, item):
+        preserved_keys = ['description', 'associate_no_of_days']
+        new_obj = {}
+        for key in preserved_keys:
+            value = item[key]
+            new_obj[key] = value
+        return new_obj
+
+    def _is_unrelated_activities(self, item):
+        title = item['title'].lower()
+        return bool(re.search('run | ride | swim', title))
+    
+    def _handle_date_time(self, item, start_date):
+        associate_no_of_days = item['associate_no_of_days']
+        item['date'] = str(start_date + timedelta(days=associate_no_of_days))
+        # del item['associate_no_of_days']
+        return item
+
+    def _remove_note_and_link_in_description(self, description_splitted_list):
+        min_i = len(description_splitted_list)
+        for i, token in enumerate(description_splitted_list):
+            if i < min_i:
+                if token.startswith('[ ') or bool(re.search('[Dd]ownload', token)):
+                    min_i = i
+        return description_splitted_list[:min_i]
+
+    def _parse_html_to_text(self, item):
+        html_parsed = html2text.html2text(item['description']).replace('*', '')
+        description_splitted_list = html_parsed.split('\n')
+        description_splitted_list = list(filter(None, map(lambda token: None if not token.strip() else token.strip(), description_splitted_list)))
+        description_splitted_list = self._remove_note_and_link_in_description(description_splitted_list)
+        activity_name = description_splitted_list[0] if len(description_splitted_list) else 'Unknown Activity Name'
+        # warm_up_params = self.get_warm_up_params(description_splitted_list)
+        processed_descriptions = {
+            # 'activity_name': activity_name,
+            # 'warmup': warm_up_params
+        }
+        del item['description']
+        item['description'] = description_splitted_list
+        description_str = ' '.join(description_splitted_list)
+        item['description_str'] = description_str
+        item['processed_descriptions'] = self.spear_dict(processed_descriptions)
+        return self.spear_dict(item, '', False)
+
+    def get_warm_up_params(self, description_splitted_list):
+        REGEX_WARM_UP = r'[Ww]arm[\ ]?[Uu]p'
+        REGEX_MAIN_SET = r'[Mm]ain[\ ]?[Ss]et'
+        REGEX_MINUTES = r'(\d+)(\ )*[Mm][Ii][Nn](ute)?(s)?'
+        REGEX_T_ZONE = r'T(\d)'
+        REGEX_RPM = r'(\d+)[\ ]*([Rr][Pp][Mm]([Ss])?)'
+
+        # some of the training descriptions don't have the `Warm up` keyword.
+        try:
+            warm_up_ind_list = self.grep(description_splitted_list, REGEX_WARM_UP)
+            main_set_ind_list = self.grep(description_splitted_list, REGEX_MAIN_SET)
+
+            warm_up_index = warm_up_ind_list[0] if len(
+                warm_up_ind_list) > 0 else -1
+            main_set_index = main_set_ind_list[0] if len(
+                main_set_ind_list) > 0 else -1
+
+            warm_up_description = description_splitted_list[1:main_set_index] if warm_up_index == - \
+                1 else description_splitted_list[warm_up_index+1:main_set_index]
+            print('-'*30)
+            print('warm_up_description: ', warm_up_description)
+
+            warm_up_params = {}
+            for i, item in enumerate(warm_up_description):
+                session_number = i + 1
+                minutes_match = re.search(REGEX_MINUTES, item)
+                t_zone_match = re.findall(REGEX_T_ZONE, item)
+                print('item: ', item)
+                rpms_match = re.search(REGEX_RPM, item)
+
+                if minutes_match:
+                    warm_up_params['activity_{}_time_minutes'.format(
+                        session_number)] = int(minutes_match.group(1))
+                if len(t_zone_match):
+                    print('t_zone_match: ', t_zone_match)
+                    for zone in t_zone_match:
+                        warm_up_params['activity_{}_t_zone_{}'.format(session_number, zone)] = 1
+                if rpms_match:
+                    warm_up_params['activity_{}_rpms'.format(
+                        session_number)] = int(rpms_match.group(1))
+                # TODO: activity regex
+
+            return warm_up_params
+        except:
+            print("Unexpected error:", sys.exc_info()[0])
+            raise
+
+        return []
+
+    def clean_training_descriptions(self, descriptions, planner):
+        start_date = planner['starting_date']
+        end_interval = planner['end_interval']
+        cleaned_descriptions = []
+        tmp = []
+        tmp2 = []
+        for item in descriptions:
+            item = self._keep_useful_keys(item)
+            item = self._parse_html_to_text(item)
+            tmp.append(item)
+        for i in range(end_interval):
+            start_date = start_date + relativedelta(months=1)
+            for item in tmp:
+                item = self._handle_date_time(item, start_date)
+                tmp2.append(item)
+        for i, item in enumerate(tmp2):
+            if i > 0 and item['date'] == tmp2[i-1]['date']:
+                obj = {
+                    'description': tmp2[i-1]['description'] + item['description'],
+                    'description_str': tmp2[i-1]['description_str'] + '; ' + item['description_str'],
+                    'date': item['date']
+                }
+                cleaned_descriptions.append(obj)
+        # tokenize
+        for item in cleaned_descriptions:
+            item['tokens'] = word_tokenize(item['description_str'])
+            # print('\n',item)
+
+        return cleaned_descriptions
+
 
 def _create_cleaned_data_folder(data_type):
     if data_type == 'spreadsheet':
@@ -747,6 +909,10 @@ def _create_cleaned_data_folder(data_type):
         cleaned_additional_folder = '{}/data/cleaned_additional'.format(os.path.pardir)
         if not os.path.exists(cleaned_additional_folder):
             os.mkdir(cleaned_additional_folder)
+    elif data_type == 'training_descriptions':
+        cleaned_training_descriptions = '{}/data/cleaned_training_descriptions'.format(os.path.pardir)
+        if not os.path.exists(cleaned_training_descriptions):
+            os.mkdir(cleaned_training_descriptions)
     else:
         raise Exception('No {} type of datasets'.format(data_type))
 
@@ -759,6 +925,10 @@ def _create_log_folders(data_type, athletes_name=None):
         log_folder_names = ['spreadsheet_missing_value_log', 'spreadsheet_outlier_log']
     elif data_type == 'additional':
         log_folder_names = ['additional_missing_value_log', 'additional_outlier_log']
+        if athletes_name:
+            log_folder_names.extend(['{}/{}'.format(name, athletes_name) for name in log_folder_names])
+    elif data_type == 'training_descriptions':
+        log_folder_names = ['training_descriptions_missing_value_log', 'training_descriptions_outlier_log']
         if athletes_name:
             log_folder_names.extend(['{}/{}'.format(name, athletes_name) for name in log_folder_names])
     else:
@@ -794,6 +964,49 @@ def _save_log(data_type, log_type, file_name, log_df, athletes_name=None):
         raise Exception('No {} type of datasets'.format(data_type))
     if not log_df.empty:
         log_df.to_csv(log_file_path, index=False)
+
+def _main_helper_training_descriptions(athletes_name=None, verbose=False):
+    data_loader_training_descriptions = DataLoader('training_descriptions')
+    raw_descriptions, planner = data_loader_training_descriptions.load_training_descriptions(athletes_name=athletes_name)
+    training_description_cleaner = TrainingDescriptionsDataCleaner()
+    cleaned_description = training_description_cleaner.clean_training_descriptions(raw_descriptions, planner)
+    # one hot encoding
+    tokens_set = set(functools.reduce(operator.iconcat, list(map(lambda item: item['tokens'] ,cleaned_description)), []))
+    dim = len(tokens_set)
+    all_data_td_map = {}
+    idx = 0
+    for token in tokens_set:
+        all_data_td_map[token] = idx
+        idx += 1
+    for i, item in enumerate(cleaned_description):
+        one_hot_td = []
+        for token in item['tokens']:
+            onehot = np.zeros(dim)
+            onehot[all_data_td_map[token]] = 1
+            one_hot_td.append(onehot)
+        cleaned_description[i]['onehot'] = one_hot_td
+    df = pd.DataFrame(cleaned_description)
+    columns_need = ['date', 'onehot']
+    columns_need_imputation_athlete = [column for column in df.columns if column in columns_need]
+    df1 = df[columns_need_imputation_athlete]
+    # print('---------------------- \ndf1: \n', df1.loc[0:15])
+    # load merged csv and pick tss
+    loader = DataLoader()
+    data_set = loader.load_merged_data(athletes_name=athletes_name)
+    df2 = pd.DataFrame(data_set)
+    # merge td with tss
+    for index, record in df2.iterrows():
+        date = str(record['Date']).split(' ')[0]
+        df2.at[index, 'date'] = date
+    columns_need = ['date', 'Training Stress Score®']
+    columns_need_imputation_athlete = [column for column in df2.columns if column in columns_need]
+    df2 = df2[columns_need_imputation_athlete]
+    # print('---------------------- \ndf2: \n', df2.loc[130:145])
+    final_df = pd.merge(df1, df2, left_on='date', right_on='date', left_index=True, how='inner')
+    # print(final_df)
+
+    data_merge._save_merged_df('one_hot.csv', final_df, verbose=True)
+
 
 
 def _main_helper_spreadsheet(athletes_name=None, file_name: str = None, verbose=False):
@@ -878,16 +1091,21 @@ def main(data_type='spreadsheet', athletes_name: str = None, activity_type: str 
         # Clean all additional data for the given athlete
         _main_helper_additional(athletes_name, activity_type, split_type, verbose=verbose)
 
+    elif data_type == 'training_descriptions':
+        _main_helper_training_descriptions(athletes_name=athletes_name, verbose=verbose)
+
 
 if __name__ == '__main__':
     athletes_names = ['eduardo oliveira', 'xu chen', 'carly hart']
+    # Clean training descriptions
+    main('training_descriptions', athletes_name=athletes_names[0], verbose=True)
 
     # Clean spreadsheet data
     # main('spreadsheet')  # clean all spreadsheet data
-    main('spreadsheet', athletes_name=athletes_names[2], verbose=True)  # clean spreadsheet data for one athlete
+    main('spreadsheet', athletes_name=athletes_names[0], verbose=True)  # clean spreadsheet data for one athlete
 
     # Clean additional data
     activity_types = ['cycling', 'running', 'swimming']
     split_type = 'real-time'
     for activity_type in activity_types:
-        main('additional', athletes_name=athletes_names[2], activity_type=activity_type, split_type=split_type, verbose=True)
+        main('additional', athletes_name=athletes_names[0], activity_type=activity_type, split_type=split_type, verbose=True)

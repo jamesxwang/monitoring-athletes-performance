@@ -20,8 +20,7 @@ import pandas as pd
 import numpy as np
 # Self-defined modules
 import data_feature_engineering
-
-
+import data_loader
 def _save_merged_df(file_name, merged_dataframe: pd.DataFrame, verbose):
     merged_data_folder = '{}/data/merged_dataframes'.format(os.path.pardir)
     if not os.path.exists(merged_data_folder):

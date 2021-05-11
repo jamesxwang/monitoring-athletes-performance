@@ -16,6 +16,7 @@ import os
 import pandas as pd
 import utility
 from configparser import ConfigParser
+from training_description.database_queries import DatabaseQueries
 
 
 class DataLoader():
@@ -47,6 +48,10 @@ class DataLoader():
         self.config = ConfigParser()
         self.config.read(data_names)
 
+    def load_training_descriptions(self, athletes_name=None):
+        queries = DatabaseQueries()
+        raw_descriptions, planner = queries.describe_descriptions_by_name(athletes_name)
+        return raw_descriptions, planner
 
     def load_spreadsheet_data(self, file_name=None, athletes_name=None):
         """Load the spreadsheet data for an athlete
@@ -142,6 +147,10 @@ class DataLoader():
 
     def load_merged_data(self, athletes_name):
         file_path = '{}/merged_dataframes/merged_{}.csv'.format(self.data_path, '_'.join(athletes_name.lower().split()))
+        return pd.read_csv(file_path, sep=',')
+
+    def load_one_hot_data(self, athletes_name):
+        file_path = '{}/merged_dataframes/one_hot.csv'.format(self.data_path)
         return pd.read_csv(file_path, sep=',')
 
 

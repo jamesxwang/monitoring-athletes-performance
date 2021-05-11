@@ -38,6 +38,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm, trange
+from matplotlib import pyplot as plt
 
 filterwarnings('ignore')
 
@@ -277,6 +278,18 @@ class ModelRandomForest(TrainLoadModelBuilder):
                                    cv = 3, n_jobs = -1, verbose=0)
         grid_search.fit(X_train, y_train)
         best_grid = grid_search.best_estimator_
+
+        print('-'*25, 'Feature Importance Start', '-'*25)
+        names = X_train.columns
+        keys = X_train.keys()
+        feature_importance = best_grid.feature_importances_
+        plt.bar([x for x in names], list(map(lambda x: x * 100, feature_importance)))
+        plt.xticks(rotation=45)
+        plt.xlabel('features')
+        plt.ylabel('importance (%)')
+        plt.show()
+        print('-'*25, 'Feature Importance Ends', '-'*25)
+
         return best_grid
 
     def process_modeling(self):
@@ -547,6 +560,32 @@ class PerformanceModelBuilder():
     def __init__(self):
         pass
 
+def process_training_description_modeling(athletes_name):
+    loader = data_loader.DataLoader()
+    df = pd.DataFrame(loader.load_one_hot_data(athletes_name=athletes_name))
+    print('df: ', df)
+    best_model_dict = {}
+
+    def select_best_model():
+        min_mae, best_model_type, best_regressor = float('inf'), '', None
+        for model_class in [ModelTorchNN]:
+            model_type = model_class.__name__[5:]
+            print('\nBuilding {}...'.format(model_type))
+            sub_dataframe_for_modeling = df[df['Training Stress Score®'].notnull()]
+            builder = model_class(sub_dataframe_for_modeling)
+            mae, regressor = builder.process_modeling()
+            utility.save_model(athletes_name, None, model_type, regressor)
+            print('min_mae: ', min_mae)
+            print('mae: ', mae)
+            print('best_model_type: ', best_model_type)
+            print('best_regressor: ', best_regressor)
+            if mae < min_mae: min_mae, best_model_type, best_regressor = mae, model_type, regressor
+        print("\n***Best model for activity '{}' is {} with mean absolute error: {}***".format(activity, best_model_type, min_mae))
+        if best_regressor is not None:
+            best_model_dict[activity] = best_model_type
+    print('best_model_dict: ', best_model_dict)
+
+    select_best_model()
 
 def process_train_load_modeling(athletes_name):
     loader = data_loader.DataLoader()
@@ -566,8 +605,8 @@ def process_train_load_modeling(athletes_name):
 
             def select_best_model():
                 min_mae, best_model_type, best_regressor = float('inf'), '', None
-                for model_class in [ModelBayesianRidge, ModelGaussianProcess, ModelLinearRegression, ModelNeuralNetwork, ModelRandomForest, ModelXGBoost, ModelAdaBoost, ModelTorchNN]:
-                # for model_class in [ModelTorchNN]:
+                # for model_class in [ModelBayesianRidge, ModelGaussianProcess, ModelLinearRegression, ModelNeuralNetwork, ModelRandomForest, ModelXGBoost, ModelAdaBoost, ModelTorchNN]:
+                for model_class in [ModelRandomForest]:
                     model_type = model_class.__name__[5:]
                     print('\nBuilding {}...'.format(model_type))
                     builder = model_class(sub_dataframe_for_modeling, features)
@@ -599,9 +638,10 @@ def process_performance_modeling(athletes_name):
 
 if __name__ == '__main__':
     # athletes_names = ['eduardo oliveira', 'xu chen', 'carly hart']
-    athletes_names = ['carly hart']
+    athletes_names = ['eduardo oliveira']
     for athletes_name in athletes_names:
         print('\n\n\n{} {} {} '.format('='*25, athletes_name.title(), '='*25))
-        process_train_load_modeling(athletes_name)
+        # process_train_load_modeling(athletes_name)
         process_performance_modeling(athletes_name)
+        process_training_description_modeling(athletes_name)
 

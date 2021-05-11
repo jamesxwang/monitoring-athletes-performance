@@ -8,7 +8,7 @@ class DatabaseQueries():
         user_id_map = {
             'eduardo oliveira': 56
         }
-        return user_id_map[user_name]
+        return user_id_map[user_name.lower()]
     
     def describe_planner_id_by_user_id(self, user_id):
         sql = """
