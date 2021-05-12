@@ -1002,7 +1002,7 @@ def _main_helper_training_descriptions(athletes_name=None, verbose=False):
     columns_need_imputation_athlete = [column for column in df2.columns if column in columns_need]
     df2 = df2[columns_need_imputation_athlete]
     # print('---------------------- \ndf2: \n', df2.loc[130:145])
-    final_df = pd.merge(df1, df2, left_on='date', right_on='date', left_index=True, how='inner')
+    final_df = pd.merge(df1, df2, left_on='date', right_on='date', how='inner')
     # print(final_df)
     return final_df
 
