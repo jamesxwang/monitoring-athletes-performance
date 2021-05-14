@@ -40,9 +40,9 @@
             "cycling": null
         },
         "training load best models": {
-            "running": "RandomForest",
+            "running": "TorchNN",
             "swimming": null,
-            "cycling": "RandomForest",
+            "cycling": "TorchNN",
             "strength_training": null,
             "others": null
         }

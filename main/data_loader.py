@@ -49,9 +49,15 @@ class DataLoader():
         self.config.read(data_names)
 
     def load_training_descriptions(self, athletes_name=None):
-        queries = DatabaseQueries()
-        raw_descriptions, planner = queries.describe_descriptions_by_name(athletes_name)
-        return raw_descriptions, planner
+        if athletes_name == None:
+            raise Exception("No inputs in load_training_descriptions. Input an athlete's name.")
+        if self.data_type == 'training_descriptions':
+            queries = DatabaseQueries()
+            raw_descriptions, planner = queries.describe_descriptions_by_name(athletes_name)
+            return raw_descriptions, planner
+        else:
+            print('Invalid function call. Please give type \'training_descriptions\'.')
+            return None
 
     def load_spreadsheet_data(self, file_name=None, athletes_name=None):
         """Load the spreadsheet data for an athlete
@@ -147,10 +153,6 @@ class DataLoader():
 
     def load_merged_data(self, athletes_name):
         file_path = '{}/merged_dataframes/merged_{}.csv'.format(self.data_path, '_'.join(athletes_name.lower().split()))
-        return pd.read_csv(file_path, sep=',')
-
-    def load_one_hot_data(self, athletes_name):
-        file_path = '{}/merged_dataframes/one_hot.csv'.format(self.data_path)
         return pd.read_csv(file_path, sep=',')
 
 

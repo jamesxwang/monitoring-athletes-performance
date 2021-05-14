@@ -2,7 +2,9 @@ data/cleaned_additional
 data/cleaned_*
 data/csv_*
 data/fit_*
+data/merged_dataframes/
 .DS_Store
 *.pyc
-# merged_dataframes/
 log/
+.vscode/
+models/

@@ -808,7 +808,7 @@ class TrainingDescriptionsDataCleaner():
         description_splitted_list = list(filter(None, map(lambda token: None if not token.strip() else token.strip(), description_splitted_list)))
         description_splitted_list = self._remove_note_and_link_in_description(description_splitted_list)
         activity_name = description_splitted_list[0] if len(description_splitted_list) else 'Unknown Activity Name'
-        # warm_up_params = self.get_warm_up_params(description_splitted_list)
+        # warm_up_params = self._get_warm_up_params(description_splitted_list)
         processed_descriptions = {
             # 'activity_name': activity_name,
             # 'warmup': warm_up_params
@@ -820,7 +820,7 @@ class TrainingDescriptionsDataCleaner():
         item['processed_descriptions'] = self.spear_dict(processed_descriptions)
         return self.spear_dict(item, '', False)
 
-    def get_warm_up_params(self, description_splitted_list):
+    def _get_warm_up_params(self, description_splitted_list):
         REGEX_WARM_UP = r'[Ww]arm[\ ]?[Uu]p'
         REGEX_MAIN_SET = r'[Mm]ain[\ ]?[Ss]et'
         REGEX_MINUTES = r'(\d+)(\ )*[Mm][Ii][Nn](ute)?(s)?'
@@ -895,7 +895,6 @@ class TrainingDescriptionsDataCleaner():
         # tokenize
         for item in cleaned_descriptions:
             item['tokens'] = word_tokenize(item['description_str'])
-            # print('\n',item)
 
         return cleaned_descriptions
 
@@ -986,28 +985,24 @@ def _main_helper_training_descriptions(athletes_name=None, verbose=False):
             one_hot_td.append(onehot)
         cleaned_description[i]['onehot'] = one_hot_td
     df = pd.DataFrame(cleaned_description)
-    columns_need = ['date', 'onehot']
-    columns_need_imputation_athlete = [column for column in df.columns if column in columns_need]
+    columns_need_imputation_athlete = [column for column in df.columns if column in ['date', 'onehot']]
     df1 = df[columns_need_imputation_athlete]
-    # print('---------------------- \ndf1: \n', df1.loc[0:15])
+    if verbose: print('df1: \n', df1)
     # load merged csv and pick tss
     loader = DataLoader()
-    data_set = loader.load_merged_data(athletes_name=athletes_name)
-    df2 = pd.DataFrame(data_set)
+    df2 = loader.load_merged_data(athletes_name=athletes_name)
     # merge td with tss
+    discard_watch_data_columns = False
     for index, record in df2.iterrows():
         date = str(record['Date']).split(' ')[0]
-        df2.at[index, 'date'] = date
-    columns_need = ['date', 'Training Stress Score®']
-    columns_need_imputation_athlete = [column for column in df2.columns if column in columns_need]
-    df2 = df2[columns_need_imputation_athlete]
-    # print('---------------------- \ndf2: \n', df2.loc[130:145])
-    final_df = pd.merge(df1, df2, left_on='date', right_on='date', how='inner')
-    # print(final_df)
+        df2.at[index, 'Date'] = date
+    if discard_watch_data_columns:
+        columns_need_imputation_athlete = [column for column in df2.columns if column in ['Date', 'Training Stress Score®']]
+        df2 = df2[columns_need_imputation_athlete]
+    if verbose: print('df2: \n', df2)
+    final_df = pd.merge(df1, df2, left_on='date', right_on='Date', how='inner')
+    if verbose: print(final_df)
     return final_df
-
-    # data_merge.save_df_with_array('one_hot.csv', final_df, verbose=True)
-
 
 
 def _main_helper_spreadsheet(athletes_name=None, file_name: str = None, verbose=False):
