@@ -7,16 +7,18 @@ import matplotlib.pyplot as plt
 # Self-defined modules
 import utility
 from data_loader import DataLoader
-
+from data_modeling import ToyRNNModel
 
 def _add_fitness_fatigue(dataframe):
     dataframe['Date'] = pd.to_datetime(dataframe.Date)
     dataframe['Fatigue (ATL)'] = dataframe.rolling('7d', min_periods=1, on='Date')['Training Stress Score®'].mean()
     dataframe['Fitness (CTL)'] = dataframe.rolling('42d', min_periods=1, on='Date')['Training Stress Score®'].mean()
-
+    dataframe['Predicted Fatigue (ATL)'] = dataframe.rolling('7d', min_periods=1, on='Date')['predict TSS'].mean()
+    dataframe['Predicted Fitness (CTL)'] = dataframe.rolling('42d', min_periods=1, on='Date')['predict TSS'].mean()
 
 def _add_form(dataframe):
     dataframe['Form (TSB)'] = dataframe['Fitness (CTL)'] - dataframe['Fatigue (ATL)']
+    dataframe['Predicted Form (TSB)'] = dataframe['Predicted Fitness (CTL)'] - dataframe['Predicted Fatigue (ATL)']
 
 
 def _label_data_record(spreadsheet):
@@ -41,6 +43,7 @@ def _generate_pmc(athletes_name, dataframe, display_tss=True, save=True):
     ax2 = ax.twinx()
     dates = dataframe['Date']
     TSS, ATL, CTL, TSB = 'Training Stress Score®', 'Fatigue (ATL)', 'Fitness (CTL)', 'Form (TSB)'
+    PRED_TSS, PRED_ATL, PRED_CTL, PRED_TSB = 'predict TSS', 'Predicted Fatigue (ATL)', 'Predicted Fitness (CTL)', 'Predicted Form (TSB)'
 
     def plot_TSS():
         tss = dataframe[TSS]
@@ -57,6 +60,13 @@ def _generate_pmc(athletes_name, dataframe, display_tss=True, save=True):
         ax2.plot(dates, dataframe[CTL], label=CTL, color='orange')
         ax2.plot(dates, dataframe[TSB], label=TSB, color='pink')
         ax2.set_ylabel('CTL / ATL / TSB')
+        ax2.set_ylim([-100, 275])
+
+    def plot_predict_fatigue_and_fitness():
+        ax2.plot(dates, dataframe[PRED_ATL], label=PRED_ATL, color='red')
+        ax2.plot(dates, dataframe[PRED_CTL], label=PRED_CTL, color='blue')
+        ax2.plot(dates, dataframe[PRED_TSB], label=PRED_TSB, color='gray')
+        ax2.set_ylabel('Predicted CTL / Predicted ATL / Predicted TSB')
         ax2.set_ylim([-100, 275])
 
     def plot_zones():
@@ -76,6 +86,7 @@ def _generate_pmc(athletes_name, dataframe, display_tss=True, save=True):
     if display_tss:
         plot_TSS()
     plot_fatigue_and_fitness()
+    plot_predict_fatigue_and_fitness()
     plot_zones()
     plt.title('Performance Management Chart - {}'.format(athletes_name.title()))
     plt.legend()
@@ -106,17 +117,45 @@ def get_tss_estimated_data(athletes_name):
         else:
             pass
             # print("No model for {}'s {} activity".format(athletes_name.title(), activity))
-    return original_merged_data
+
+    predicted_merged_data = DataLoader().load_training_description_with_watch_data(athletes_name=athletes_name)
+    PREDICT_TSS = 'Predict TSS'
+    predicted_sub_dataframe_dict = utility.split_dataframe_by_activities(predicted_merged_data)
+    predicted_model_types = utility.get_performance_model_types(athletes_name)
+    for activity, sub_dataframe in predicted_sub_dataframe_dict.items():
+        best_model_type_for_activity = predicted_model_types[activity]
+        if best_model_type_for_activity:
+            sub_dataframe_for_modeling = sub_dataframe[sub_dataframe[TSS].notnull()]
+            regressor = utility.load_model(athletes_name, activity, best_model_type_for_activity)
+            features = [feature for feature in ['onehot'] if feature in sub_dataframe_for_modeling.columns and feature != TSS and not sub_dataframe[feature].isnull().any()]
+            X, y = sub_dataframe[features], list(sub_dataframe[TSS])
+            y_pred = regressor.predict(X)
+            y_final = [y[i] if y[i] is np.nan else y_pred[i] for i in range(len(y))]
+            predicted_merged_data.loc[sub_dataframe.index, TSS] = y_final
+    return original_merged_data, predicted_merged_data
 
 
 def process_pmc_generation(athletes_name, display_tss=True, save_pmc_figure=True):
-    dataframe_for_pmc = get_tss_estimated_data(athletes_name)
-    _add_fitness_fatigue(dataframe_for_pmc)
-    _add_form(dataframe_for_pmc)
-    _generate_pmc(athletes_name, dataframe_for_pmc, display_tss=display_tss, save=save_pmc_figure)
+    dataframe_for_pmc, predicted_dataframe_for_pmc = get_tss_estimated_data(athletes_name)
+    for index, record in dataframe_for_pmc.iterrows():
+        date = str(record['Date']).split(' ')
+        dataframe_for_pmc.at[index, 'Date'] = date[0]
+        dataframe_for_pmc.at[index, 'Time'] = date[1]
+    dataframe_for_pmc = utility.keep_keys_in_dataframe(['Date', 'Training Stress Score®'], dataframe_for_pmc)
+    predicted_dataframe_for_pmc = utility.keep_keys_in_dataframe(['date', 'Training Stress Score®'], predicted_dataframe_for_pmc)
+    predicted_dataframe_for_pmc.rename(columns = { 'Training Stress Score®': 'predict TSS' }, inplace = True)
+    final_df = pd.merge(dataframe_for_pmc, predicted_dataframe_for_pmc, left_on='Date', right_on='date', how='left')
+
+    _add_fitness_fatigue(final_df)
+    _add_form(final_df)
+    _generate_pmc(athletes_name, final_df, display_tss=display_tss, save=save_pmc_figure)
 
 
 if __name__ == '__main__':
-    athletes_names = ['eduardo oliveira', 'xu chen', 'carly hart']
+    athletes_names = [
+        'eduardo oliveira',
+        # 'xu chen',
+        # 'carly hart'
+        ]
     for athletes_name in athletes_names:
         process_pmc_generation(athletes_name, display_tss=True)

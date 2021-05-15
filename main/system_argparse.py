@@ -12,6 +12,9 @@ def parse_options(internal_args: []):
     parser.add_argument('--process-feature-engineering', dest='do_feature_engineering', required=False,
                         type=lambda x: (str(x).lower() == 'true'),
                         default=True, help='whether process feature engineering')
+    parser.add_argument('--with-training-descriptions', dest='do_add_training_description', required=False,
+                        type=lambda x: (str(x).lower() == 'true'),
+                        default=True, help='whether add training descriptions')
     parser.add_argument('--build-model', dest='do_modeling', required=False,
                         type=lambda x: (str(x).lower() == 'true'),
                         default=True, help='whether process modeling')

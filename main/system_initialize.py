@@ -98,9 +98,12 @@ def initialize_json():
                     "andy coogan lactate threshold": None,
                     "training load best models": {"running": None, "swimming": None, "cycling": None,
                                                  "strength_training": None, "others": None},
-                    "performance best models": {"running": None, "swimming": None, "cycling": None}
+                    "performance best models": {"running": None, "swimming": None, "cycling": None,
+                                                 "strength_training": None, "others": None}
                 }
             athletes_info_json[athletes_name.title()]["training load best models"] = {"running": None, "swimming": None, "cycling": None,
+                                                 "strength_training": None, "others": None}
+            athletes_info_json[athletes_name.title()]["performance best models"] = {"running": None, "swimming": None, "cycling": None,
                                                  "strength_training": None, "others": None}
     with open(athlete_info_json_path, 'w') as file:
         json.dump(athletes_info_json, file, indent=4)

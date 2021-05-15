@@ -17,6 +17,7 @@ import data_modeling
 import generate_pmc
 import system_argparse
 from utility import SystemReminder as Reminder
+from data_modeling import ToyRNNModel
 
 
 def main(internal_args=None):
@@ -27,12 +28,13 @@ def main(internal_args=None):
         run_system(athletes_name=athletes_name.lower().replace('_', ' '),
                    cleaning=options['do_cleaning'],
                    feature_engineering=options['do_feature_engineering'],
+                   add_training_descriptions=options['do_add_training_description'],
                    modeling=options['do_modeling'],
                    pmc_generating=options['do_pmc_generating'])
 
 
 def run_system(athletes_name: str, cleaning: bool=True, feature_engineering: bool=True,
-               modeling: bool=True, pmc_generating: bool=True):
+               add_training_descriptions: bool=False, modeling: bool=True, pmc_generating: bool=True):
     """ Run the system
     Process: Data cleaning, Feature Engineering, Modeling.
     """
@@ -76,9 +78,10 @@ def run_system(athletes_name: str, cleaning: bool=True, feature_engineering: boo
         data_modeling.process_train_load_modeling(athletes_name)
         reminder.display_modeling_end(athletes_name, 'Assessing Training Load')
 
-        # reminder.display_modeling_start(athletes_name, 'Predicting Performance')
-        # data_modeling.process_performance_modeling(athletes_name)
-        # reminder.display_modeling_end(athletes_name, 'Predicting Performance')
+        if add_training_descriptions:
+            reminder.display_modeling_start(athletes_name, 'Predicting Performance')
+            data_modeling.process_performance_modeling(athletes_name)
+            reminder.display_modeling_end(athletes_name, 'Predicting Performance')
 
     # Generate PMC
     if pmc_generating:
@@ -95,9 +98,9 @@ if __name__ == '__main__':
 
     # For Developers. Uncomment the following lines if you would like test the system.
     # athletes_names = ['eduardo_oliveira', 'xu_chen', 'carly_hart']
-    athletes_names = ['eduardo_oliveira', 'carly_hart']
+    athletes_names = ['eduardo_oliveira']
     internal_args = ['--athletes-names={}'.format(' '.join(athletes_names)),
                      '--initialize-system=False', '--clean-data=False', '--process-feature-engineering=False',
-                     '--build-model=True', '--generate-pmc=False']
+                     '--with-training-descriptions=True', '--build-model=False', '--generate-pmc=True']
     main(internal_args)
 

@@ -43,6 +43,9 @@ parser_data_names.read(data_names_config)
 parser_column_types.read(column_data_types_config)
 parser_activity_types.read(activity_types_config)
 
+def keep_keys_in_dataframe(keys, dataframe):
+    columns_need_imputation_athlete = [column for column in dataframe.columns if column in keys]
+    return dataframe[columns_need_imputation_athlete]
 
 def create_all_folders():
     """Create all the folders that are needed for the system"""
@@ -264,7 +267,7 @@ def get_athletes_lact_thr(athletes_name) -> (float, float):
     return (jf_lact_thr, ac_lact_thr)
 
 
-def save_model(athletes_name, activity, model_type, learner):
+def save_model(athletes_name, activity, model_type, learner, is_predict=False):
     athlete_folder = '{}/models/{}'.format(os.path.pardir, '_'.join(athletes_name.split()))
     if not os.path.exists(athlete_folder):
         os.mkdir(athlete_folder)
@@ -272,6 +275,8 @@ def save_model(athletes_name, activity, model_type, learner):
     if not os.path.exists(model_folder):
         os.mkdir(model_folder)
     model_filename = '{}/{}'.format(model_folder, model_type)
+    if is_predict:
+        model_filename = '{}/Predict{}'.format(model_folder, model_type)
     joblib.dump(learner, model_filename)
 
 
@@ -288,12 +293,25 @@ def get_train_load_model_types(athletes_name):
         json_obj = json.load(json_file)
     return json_obj[athletes_name.title()]["training load best models"]
 
+def get_performance_model_types(athletes_name):
+    with open(athlete_personal_info_json) as json_file:
+        json_obj = json.load(json_file)
+    return json_obj[athletes_name.title()]["performance best models"]
+
 
 def update_trainload_model_types(athletes_name: str, model_type_dict: dict):
     with open(athlete_personal_info_json) as json_file:
         json_obj = json.load(json_file)
     for activity, model_type in model_type_dict.items():
         json_obj[athletes_name.title()]["training load best models"][activity] = model_type
+    with open(athlete_personal_info_json, 'w') as json_file:
+        json.dump(json_obj, json_file, indent=4)
+
+def update_performance_model_types(athletes_name: str, model_type_dict: dict):
+    with open(athlete_personal_info_json) as json_file:
+        json_obj = json.load(json_file)
+    for activity, model_type in model_type_dict.items():
+        json_obj[athletes_name.title()]["performance best models"][activity] = model_type
     with open(athlete_personal_info_json, 'w') as json_file:
         json.dump(json_obj, json_file, indent=4)
 

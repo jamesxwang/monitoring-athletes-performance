@@ -34,15 +34,20 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels \
     import RBF, WhiteKernel, RationalQuadratic, ExpSineSquared
 from sklearn.linear_model import BayesianRidge
-
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from tqdm import trange
+import functools
+import operator
 
 filterwarnings('ignore')
 
 # Self-defined modules
 import utility
 import data_loader
-
-
+from training_description.database_queries import DatabaseQueries
+import data_cleaning
 # Set the data frame display option
 pd.set_option('display.max_row', 20)
 pd.set_option('display.max_columns', 20)
@@ -425,6 +430,112 @@ class ModelAdaBoost(TrainLoadModelBuilder):
         return mae, regressor
 
 
+class ToyRNNModel(nn.Module):
+    def __init__(self, input_size, output_size=1, hidden_dim=32):
+        super(ToyRNNModel, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.rnn = nn.RNN(input_size, hidden_dim, batch_first=True)
+        # self.fc = nn.Linear(hidden_dim, output_size)
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_dim, 128),
+            nn.GELU(),
+            nn.LayerNorm(128),
+            nn.Linear(128, output_size)
+        )
+    def forward(self, x):
+        batch_size = x.size(0)
+        hidden = self.init_hidden(batch_size)
+        out, hidden = self.rnn(x, hidden)
+        out = out[:, -1, :]
+        out = out.view(-1, self.hidden_dim)
+        out = self.fc(out)
+        return out, hidden
+    
+    def predict(self, x):
+        self.eval()
+        if isinstance(x, pd.DataFrame):
+            x = x.to_numpy()
+        new_x = []
+        for item in x:
+            tmp = []
+            for l in item:
+                tmp.append(np.array(l))
+            new_x.append(np.array(tmp))
+
+        y_predict = []
+        for x in new_x:
+            x = torch.tensor(x).float()
+            y, h = self.forward(x)
+            y = y.item()
+            y_predict.append(y)
+        return np.array(y_predict)
+
+    def init_hidden(self, batch_size):
+        hidden = torch.zeros(batch_size, 1, self.hidden_dim)
+        return hidden
+
+class ModelTorchRNN(TrainLoadModelBuilder):
+    # PyTorch Model
+    def __init__(self, dataframe, activity_features):
+        super().__init__(dataframe, activity_features)
+
+    def _build_model(self, X_train, X_test, y_train, y_test):
+        X_train, y_train = np.array(X_train), np.array(y_train)
+        X_test, y_test = np.array(X_test), np.array(y_test)
+        X_full = np.concatenate((X_train, X_test), axis=0)
+        y_full = np.concatenate((y_train, y_test), axis=0)
+        print(X_train.shape, X_full.shape)
+        # hyper parameter
+        epochs = 100
+        wd = 5e-5
+        lr = 0.001 
+        rnn_hidden_dim = 512
+        # Build Model
+        # X_train[Batch, 1, one_hots]
+        # One Hot Encoding Shape: X_train[0][0][0].shape[0]
+        one_hot_dim = X_train[0][0][0].shape[0]
+        model = ToyRNNModel(one_hot_dim, hidden_dim=rnn_hidden_dim).cpu()
+        loss_fn = torch.nn.L1Loss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr,
+                                     weight_decay=wd)
+        t = trange(epochs, desc='Loss=0.0000', leave=True)
+
+        # Train Model
+        for epoch in t:
+            model.train()
+            loss_sum = 0
+            for i in range(len(X_train)):
+                x = np.array(X_train[i][0])
+                x = torch.tensor(x).float().unsqueeze(0)
+                y = torch.tensor([y_train[i]]).float()
+                model.zero_grad()
+                pred, _ = model(x)
+                # print(pred, y)
+                loss = loss_fn(pred, y)
+                loss.backward()
+                optimizer.step()
+                loss_sum += loss.item()
+            t.set_description("Loss=%.4f" % (loss_sum/len(X_train)))
+
+        # Predictions
+        model.eval()
+        y_preds = []
+        for i in range(len(X_full)):
+            with torch.no_grad():
+                x = np.array(X_full[i][0])
+                x = torch.tensor(x).float().unsqueeze(0)
+                pred, _ = model(x)
+                pred = pred.item()
+                y_preds.append(pred)
+        y_preds = np.array(y_preds)
+        mae = mean_absolute_error(y_full, y_preds)
+        return mae, model
+
+    def process_modeling(self):
+        X_train, X_test, y_train, y_test = self._split_train_validation()
+        mae, neural_network = self._build_model(X_train, X_test, y_train, y_test)
+        return mae, neural_network
+
 class PerformanceModelBuilder():
 
     def __init__(self):
@@ -471,11 +582,45 @@ def process_train_load_modeling(athletes_name):
 
 
 def process_performance_modeling(athletes_name):
-    pass
+    loader = data_loader.DataLoader()
+    data_set = loader.load_training_description_with_watch_data(athletes_name=athletes_name)
+    sub_dataframe_dict = utility.split_dataframe_by_activities(data_set)
+    best_model_dict = {}
 
+    for activity, sub_dataframe in sub_dataframe_dict.items():
+        utility.SystemReminder().display_activity_modeling_start(activity)
+        sub_dataframe_for_modeling = sub_dataframe[sub_dataframe['Training Stress Score®'].notnull()]
+        if sub_dataframe_for_modeling.shape[0] > 20:
+            features = ['onehot']
+            [feature for feature in ['onehot'] if feature in sub_dataframe.columns and not sub_dataframe[feature].isnull().any()]
+
+            def select_best_model():
+                min_mae, best_model_type, best_regressor = float('inf'), '', None
+                for model_class in [ModelTorchRNN]:
+                    model_type = model_class.__name__[5:]
+                    print('\nBuilding {}...'.format(model_type))
+                    builder = model_class(sub_dataframe_for_modeling, features)
+                    mae, regressor = builder.process_modeling()
+                    utility.save_model(athletes_name, activity, model_type, regressor, is_predict=True)
+                    if mae < min_mae:
+                        min_mae, best_model_type, best_regressor = mae, model_type, regressor
+                print("\n***Best model for activity '{}' is {} with mean absolute error: {}***".format(activity, best_model_type, min_mae))
+                if best_regressor is not None:
+                    best_model_dict[activity] = 'Predict{}'.format(best_model_type)
+            
+            select_best_model()
+            utility.SystemReminder().display_activity_modeling_end(activity, True)
+
+        else:
+            utility.SystemReminder().display_activity_modeling_end(activity, False)
+    utility.update_performance_model_types(athletes_name, best_model_dict)
 
 if __name__ == '__main__':
-    athletes_names = ['eduardo oliveira', 'xu chen', 'carly hart']
+    athletes_names = [
+        'eduardo oliveira',
+        # 'xu chen',
+        # 'carly hart'
+    ]
     for athletes_name in athletes_names:
         print('\n\n\n{} {} {} '.format('='*25, athletes_name.title(), '='*25))
         process_train_load_modeling(athletes_name)
